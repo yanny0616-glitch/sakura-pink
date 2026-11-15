@@ -1,0 +1,5 @@
+{
+  "name": "sakura-pink-mods",
+  "owner": { "name": "yanny0616-glitch" },
+  "plugins": [{ "name": "sakura-pink", "source": "./" }]
+}
