@@ -149,6 +149,25 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // 压缩完，引擎要等下一次回答才报新的上下文用量；这里先按压缩后的大小算出来，
+  // 不然提醒卡片和上下文条会一直停在压缩前的数字
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+
+    if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
+      const { context } = await $.session.usage()
+      const usage = (await $.state.get(USAGE)).value ?? {}
+      const after =
+        done.tokensAfter !== undefined && context.window > 0
+          ? Math.min(100, (done.tokensAfter / context.window) * 100)
+          : undefined
+
+      await $.state.set(USAGE, { ...usage, context: after })
+    }
+
+    return done
+  })
+
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       lastActive = Date.now()
@@ -317,8 +336,11 @@ export const register: Register = on => {
                     if ('skip' in done && done.skip !== undefined) {
                       $.ui.toast('这次压缩被跳过了')
                     }
-                  } catch {
-                    $.ui.toast('现在没法压缩，等这一轮结束再试')
+                  } catch (err) {
+                    // 把引擎给的真实原因带上，不再一律说“等这一轮结束”
+                    const why = err instanceof Error ? err.message : String(err)
+
+                    $.ui.toast(`没压缩成功：${why}`)
                   }
                 }}
               />
