@@ -7,6 +7,10 @@ export type Usage = {
   fiveHour?: number
   /** 5 小时额度什么时候重置（ISO 时间） */
   resetsAt?: string
+  /** 每周额度用了百分之几；读不到时没有 */
+  weekly?: number
+  /** 每周额度什么时候重置（ISO 时间） */
+  weeklyResetsAt?: string
   /** 上下文窗口用了百分之几 */
   context?: number
 }

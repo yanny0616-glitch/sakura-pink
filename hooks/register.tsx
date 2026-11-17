@@ -48,8 +48,15 @@ const AGENTS = { plugin: 'sakura-pink', key: 'agents' } as const
 const fiveHour = (windows: SessionRateLimit[]) => windows.find(w => w.kind === 'five_hour')?.percentUsed
 const usageOf = (windows: SessionRateLimit[], context: SessionContextUsage): Usage => {
   const five = windows.find(w => w.kind === 'five_hour')
+  const week = windows.find(w => w.kind === 'seven_day')
 
-  return { fiveHour: five?.percentUsed, resetsAt: five?.resetsAt, context: context.percent }
+  return {
+    fiveHour: five?.percentUsed,
+    resetsAt: five?.resetsAt,
+    weekly: week?.percentUsed,
+    weeklyResetsAt: week?.resetsAt,
+    context: context.percent,
+  }
 }
 // 上下文用到这么多就提醒压缩
 const CONTEXT_WARN = 85
@@ -64,8 +71,10 @@ const PET_W = 64
 const PINK = '#c76a84'
 const DEEP = '#b5405f'
 
-/** 重置时间按本机时间显示成 15:20 */
-const clockOf = (iso: string | undefined): string | undefined => {
+const WEEK = ['日', '一', '二', '三', '四', '五', '六']
+
+/** 重置时间按本机时间显示成 15:20；withDay 时前面加星期，如"周四 18:00" */
+const clockOf = (iso: string | undefined, withDay = false): string | undefined => {
   if (iso === undefined) {
     return undefined
   }
@@ -75,7 +84,9 @@ const clockOf = (iso: string | undefined): string | undefined => {
     return undefined
   }
 
-  return `${at.getHours()}:${String(at.getMinutes()).padStart(2, '0')}`
+  const time = `${at.getHours()}:${String(at.getMinutes()).padStart(2, '0')}`
+
+  return withDay ? `周${WEEK[at.getDay()] ?? ''} ${time}` : time
 }
 const isLateNight = () => new Date().getHours() < 6
 
@@ -245,6 +256,7 @@ export const register: Register = on => {
     const usage = (await $.state.get(USAGE)).value ?? {}
     const isWorking = e.props.isWorking || ((await $.state.get(BUSY)).value ?? false)
     const resets = clockOf(usage.resetsAt)
+    const weekResets = clockOf(usage.weeklyResetsAt, true)
     const isFull = (usage.context ?? 0) >= CONTEXT_WARN
     const helpers = (await $.state.get(AGENTS)).value ?? 0
     const flash = (await $.state.get(FLASH)).value ?? null
@@ -312,9 +324,16 @@ export const register: Register = on => {
               />
             </Box>
           ) : null}
-          {usage.fiveHour !== undefined
-            ? bar('five', '5 小时额度', usage.fiveHour, resets === undefined ? '' : ` · ${resets} 重置`)
-            : null}
+          {usage.fiveHour !== undefined || usage.weekly !== undefined ? (
+            <Box key="quota" flexDirection="row" alignItems="center" gap="lg" flexWrap="wrap">
+              {usage.fiveHour !== undefined
+                ? bar('five', '5 小时额度', usage.fiveHour, resets === undefined ? '' : ` · ${resets} 重置`)
+                : null}
+              {usage.weekly !== undefined
+                ? bar('week', '每周额度', usage.weekly, weekResets === undefined ? '' : ` · ${weekResets} 重置`)
+                : null}
+            </Box>
+          ) : null}
           {usage.context !== undefined ? bar('context', '上下文', usage.context, '') : null}
         </Box>
         <Box flexGrow={1} />
