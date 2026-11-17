@@ -234,7 +234,7 @@ export const register: Register = on => {
     )
   })
 
-  // 输入框上方那一条：团子兔（和子代理小兔子）+ 用量条，上下文快满时多一张提醒卡片
+  // 输入框上方那一条：左边是用量条（上下文快满时多一张提醒卡片），右边是团子兔和子代理小兔子
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || e.surface !== 'desktop') {
       return next(e)
@@ -272,17 +272,6 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="row" alignItems="center" gap="md">
-        <Svg source={petSvg(mood)} alt={MOOD_TEXT[mood]} width={40} height={48} isInteractive />
-        {helpers > 0 ? (
-          <Svg
-            key="buddies"
-            source={buddySvg(helpers)}
-            alt={`${helpers} 只小兔子在帮忙`}
-            width={Math.min(4, helpers) * 21}
-            height={24}
-            isInteractive
-          />
-        ) : null}
         <Box flexDirection="column" gap="xs">
           {isFull ? (
             <Box
@@ -326,6 +315,18 @@ export const register: Register = on => {
             : null}
           {usage.context !== undefined ? bar('context', '上下文', usage.context, '') : null}
         </Box>
+        <Box flexGrow={1} />
+        {helpers > 0 ? (
+          <Svg
+            key="buddies"
+            source={buddySvg(helpers)}
+            alt={`${helpers} 只小兔子在帮忙`}
+            width={Math.min(4, helpers) * 21}
+            height={24}
+            isInteractive
+          />
+        ) : null}
+        <Svg source={petSvg(mood)} alt={MOOD_TEXT[mood]} width={40} height={48} isInteractive />
       </Box>
     )
   })
