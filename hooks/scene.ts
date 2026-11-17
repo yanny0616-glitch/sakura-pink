@@ -1,6 +1,7 @@
 // 像素风动态背景：#fff1f1 底色、三棵像素樱花树、方块花瓣飘落、像素云慢慢飘过。
 // 动画写在 SVG 自己的 <style> 里（CSS keyframes，匀速平滑移动），由 App 播放。
 // 天上有一轮像素月亮跟 5 小时额度联动：剩得越多越圆，用得越多越缺（满月 → 弦月 → 新月）。
+// Claude 干活时花瓣更密、落得更快；空闲时只零星飘几片。
 //
 // 桌面版只在 SVG 通过它的白名单时才播放动画，否则整张图按静态画。写这里时必须守住：
 //   - 不能出现 shape-rendering、vector-effect（属性名、属性值、样式里都不行）
@@ -171,10 +172,10 @@ const drawTrees = (): string => {
 // ---- 飘落的花瓣 ----
 // 每片花瓣一个 <g>：transform 属性是它静态时停的位置（动画被关掉时也好看），
 // CSS 动画接管后匀速从起点落到画布下方，途中左右轻轻摆动。
-const drawPetals = (rules: string[]): string => {
+const drawPetals = (count: number, pace: number, rules: string[]): string => {
   const petals: string[] = []
 
-  for (let i = 0; i < 44; i++) {
+  for (let i = 0; i < count; i++) {
     // 一半从某棵树的树冠附近飘出，一半从顶部落下
     const fromTree = i % 2 === 0
     const [treeX, treeY, treeScale] = TREES[(i >> 1) % TREES.length] ?? [0, 0, 1]
@@ -183,7 +184,7 @@ const drawPetals = (rules: string[]): string => {
     const y0 = (fromTree ? treeY + Math.round((rand() - 0.5) * 20 * treeScale) : -3) * CELL
     const drift = Math.round(10 + rand() * 40) * CELL
     const sway = Math.round(8 + rand() * 18)
-    const duration = (9 + rand() * 12).toFixed(1)
+    const duration = ((9 + rand() * 12) * pace).toFixed(1)
     const delay = (rand() * 20).toFixed(1)
     const rest = rand()
     const restX = Math.round(x0 - drift * rest)
@@ -286,11 +287,16 @@ const drawMoon = (phase: number): string => {
   return toPaths(cells)
 }
 
-const scenes = new Map<number, string>()
+// 空闲 / 干活两种状态下的花瓣：数量、下落时长倍数
+const CALM = { petals: 24, pace: 1.15 }
+const BUSY = { petals: 64, pace: 0.7 }
 
-/** 月相为 phase（0 满月 … 10 新月）时的整张背景 SVG，每个月相只算一次 */
-export const sceneFor = (phase: number): string => {
-  const cached = scenes.get(phase)
+const scenes = new Map<string, string>()
+
+/** 月相为 phase（0 满月 … 10 新月）、是否在干活时的整张背景 SVG，每种组合只算一次 */
+export const sceneFor = (phase: number, isBusy: boolean): string => {
+  const id = `${phase}-${isBusy}`
+  const cached = scenes.get(id)
 
   if (cached !== undefined) {
     return cached
@@ -299,7 +305,8 @@ export const sceneFor = (phase: number): string => {
   const rules: string[] = []
   const trees = drawTrees()
   const clouds = drawClouds(rules)
-  const petals = drawPetals(rules)
+  const look = isBusy ? BUSY : CALM
+  const petals = drawPetals(look.petals, look.pace, rules)
 
   rules.push(`@media (prefers-reduced-motion: reduce){g{animation:none}}`)
   const svg =
@@ -312,7 +319,40 @@ export const sceneFor = (phase: number): string => {
     petals +
     `</svg>`
 
-  scenes.set(phase, svg)
+  scenes.set(id, svg)
 
   return svg
 }
+
+// ---- 思考时的小动画 ----
+// 一朵五瓣像素樱花慢慢转，花心一闪一闪；同样守白名单（只用 rotate、opacity）。
+const flowerCells: Cells = new Map()
+const FLOWER = [
+  '...pp...',
+  '..pPPp..',
+  '.pp.PP.p',
+  'pPPyyPPp',
+  'pPPyyPPp',
+  '.pp..pp.',
+  '..pPPp..',
+  '...pp...',
+]
+
+FLOWER.forEach((line, y) => {
+  ;[...line].forEach((c, x) => {
+    const color = c === 'p' ? '#f4acbc' : c === 'P' ? '#f9c9d3' : c === 'y' ? '#f3c96b' : undefined
+
+    if (color !== undefined) {
+      flowerCells.set(`${x},${y}`, color)
+    }
+  })
+})
+
+export const SPINNER =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+  `<style>.f{transform-origin:32px 32px;animation:f 4s linear infinite}` +
+  `@keyframes f{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}` +
+  `.c{animation:c 1.2s linear infinite}@keyframes c{0%{opacity:1}50%{opacity:0.35}100%{opacity:1}}` +
+  `@media (prefers-reduced-motion: reduce){g{animation:none}}</style>` +
+  `<g class="f">${toPaths(flowerCells)}<g class="c"><rect x="24" y="24" width="16" height="16" fill="#fbe7a6"/></g></g>` +
+  `</svg>`

@@ -3,6 +3,6 @@ export type MoonPhase = number
 
 declare module 'claude-code' {
   interface PluginState {
-    'sakura-pink': { phase: MoonPhase }
+    'sakura-pink': { phase: MoonPhase; busy: boolean }
   }
 }
