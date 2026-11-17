@@ -13,6 +13,19 @@ export type Usage = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'sakura-pink': { phase: MoonPhase; busy: boolean; usage: Usage; clock: { time: string; date: string } }
+    'sakura-pink': {
+      phase: MoonPhase
+      busy: boolean
+      usage: Usage
+      /** 团子兔正在用的工具对应的动作 */
+      tool: 'read' | 'run' | 'edit' | 'search' | 'busy' | null
+      /** 一轮结束后短暂的开心或难过 */
+      flash: 'happy' | 'sad' | null
+      typing: boolean
+      sleep: boolean
+      night: boolean
+      /** 正在干活的子代理数 */
+      agents: number
+    }
   }
 }

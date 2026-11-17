@@ -3,7 +3,8 @@ import type { Register, SessionContextUsage, SessionRateLimit, ThemeSetArgs } fr
 import type { Usage } from '../types'
 
 import { makeColors } from './make-colors.js'
-import { PET_BUSY, PET_IDLE } from './pet'
+import { buddySvg, MOOD_TEXT, moodOfTool, petSvg } from './pet'
+import type { Mood } from './pet'
 import { petalBar, phaseOf, sceneFor, SPINNER } from './scene'
 
 // 底色取自参考图的 #fff1f1，卡片/面板往奶白 #fffaf3 过渡；强调色等保持 App 默认。
@@ -32,29 +33,32 @@ const LOOK: ThemeSetArgs = {
 
 // 天上的像素月亮跟着 5 小时额度走：剩得越多越圆，用得越多越缺
 const PHASE = { plugin: 'sakura-pink', key: 'phase' } as const
-// Claude 是否正在干活：干活时花瓣更密更快
+// Claude 是否正在干活：干活时花瓣更密更快，团子兔也动起来
 const BUSY = { plugin: 'sakura-pink', key: 'busy' } as const
-const fiveHour = (windows: SessionRateLimit[]) => windows.find(w => w.kind === 'five_hour')?.percentUsed
 // 输入框上方那一条显示的用量
 const USAGE = { plugin: 'sakura-pink', key: 'usage' } as const
+// 团子兔：正在用的工具对应的动作、一轮结束后短暂的开心/难过、你在打字、睡着、深夜、子代理数
+const TOOL = { plugin: 'sakura-pink', key: 'tool' } as const
+const FLASH = { plugin: 'sakura-pink', key: 'flash' } as const
+const TYPING = { plugin: 'sakura-pink', key: 'typing' } as const
+const SLEEP = { plugin: 'sakura-pink', key: 'sleep' } as const
+const NIGHT = { plugin: 'sakura-pink', key: 'night' } as const
+const AGENTS = { plugin: 'sakura-pink', key: 'agents' } as const
+
+const fiveHour = (windows: SessionRateLimit[]) => windows.find(w => w.kind === 'five_hour')?.percentUsed
 const usageOf = (windows: SessionRateLimit[], context: SessionContextUsage): Usage => {
   const five = windows.find(w => w.kind === 'five_hour')
 
   return { fiveHour: five?.percentUsed, resetsAt: five?.resetsAt, context: context.percent }
 }
-// 输入框上方那一条右边显示的时间：每 10 秒看一次，分钟变了才写，只有那一条重画
-const CLOCK = { plugin: 'sakura-pink', key: 'clock' } as const
-const WEEK = ['日', '一', '二', '三', '四', '五', '六']
-const nowText = () => {
-  const at = new Date()
-
-  return {
-    time: `${at.getHours()}:${String(at.getMinutes()).padStart(2, '0')}`,
-    date: `${at.getMonth() + 1}月${at.getDate()}日 周${WEEK[at.getDay()] ?? ''}`,
-  }
-}
 // 上下文用到这么多就提醒压缩
 const CONTEXT_WARN = 85
+// 多久没动静就睡着
+const SLEEP_AFTER = 10 * 60_000
+// 开心 / 难过持续多久
+const FLASH_FOR = 4000
+// 停止打字多久后不再看输入框
+const TYPING_FOR = 2500
 const PINK = '#c76a84'
 const DEEP = '#b5405f'
 
@@ -71,8 +75,14 @@ const clockOf = (iso: string | undefined): string | undefined => {
 
   return `${at.getHours()}:${String(at.getMinutes()).padStart(2, '0')}`
 }
+const isLateNight = () => new Date().getHours() < 6
 
 export const register: Register = on => {
+  // 这几个只在本模块里用，重载后从头算
+  let lastActive = Date.now()
+  let lastEdit = 0
+  const agents = new Set<string>()
+
   on('session.start', async ($, e, next) => {
     const unpainted = problems.find(line => line.startsWith("Desktop won't paint"))
 
@@ -86,16 +96,25 @@ export const register: Register = on => {
 
     await $.state.set(PHASE, phaseOf(fiveHour(usage.rateLimits)))
     await $.state.set(USAGE, usageOf(usage.rateLimits, usage.context))
+    await $.state.set(SLEEP, false)
+    await $.state.set(NIGHT, isLateNight())
+    await $.state.set(AGENTS, 0)
 
-    await $.state.set(CLOCK, nowText())
-    $.clock.every(10_000, () => {
-      const now = nowText()
+    // 每 30 秒看一次：是不是该睡了、是不是深夜；值变了才写，团子兔才重画
+    $.clock.every(30_000, () => {
+      void (async () => {
+        const isBusy = (await $.state.get(BUSY)).value ?? false
+        const isAsleep = !isBusy && Date.now() - lastActive > SLEEP_AFTER
 
-      void $.state.get(CLOCK).then(held => {
-        if (held.value?.time !== now.time) {
-          void $.state.set(CLOCK, now)
+        if (isAsleep !== ((await $.state.get(SLEEP)).value ?? false)) {
+          await $.state.set(SLEEP, isAsleep)
         }
-      })
+        const isNight = isLateNight()
+
+        if (isNight !== ((await $.state.get(NIGHT)).value ?? false)) {
+          await $.state.set(NIGHT, isNight)
+        }
+      })()
     })
 
     return next(e)
@@ -117,18 +136,73 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 只看主对话的开始和结束，子代理的不算
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      lastActive = Date.now()
+      if ((await $.state.get(SLEEP)).value === true) {
+        await $.state.set(SLEEP, false)
+      }
       await $.state.set(BUSY, true)
+      await $.state.set(TOOL, null)
+      await $.state.set(FLASH, null)
+    } else {
+      agents.add(e.agentId)
+      await $.state.set(AGENTS, agents.size)
     }
 
     return next(e)
   })
+
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
+      lastActive = Date.now()
       await $.state.set(BUSY, false)
+      await $.state.set(TOOL, null)
+      // 顺利答完就开心一下，被打断或出错就难过一下，几秒后恢复
+      const flash: Mood | null = e.reason === 'answer' ? 'happy' : e.reason === 'refusal' ? null : 'sad'
+
+      await $.state.set(FLASH, flash)
+      if (flash !== null) {
+        $.clock.after(FLASH_FOR, () => {
+          void $.state.set(FLASH, null)
+        })
+      }
+    } else {
+      agents.delete(e.agentId)
+      await $.state.set(AGENTS, agents.size)
     }
+
+    return next(e)
+  })
+
+  // 主对话每用一个工具，团子兔就换成对应的动作，直到下一个工具或这一轮结束
+  on('tool.call', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      const mood = moodOfTool(e.tool)
+
+      if (mood !== (await $.state.get(TOOL)).value) {
+        await $.state.set(TOOL, mood)
+      }
+    }
+
+    return next(e)
+  })
+
+  // 你在输入框打字时，团子兔看向输入框；停手一会儿就不看了
+  on('prompt.edit', async ($, e, next) => {
+    lastEdit = Date.now()
+    lastActive = Date.now()
+    if ((await $.state.get(SLEEP)).value === true) {
+      await $.state.set(SLEEP, false)
+    }
+    if ((await $.state.get(TYPING)).value !== true) {
+      await $.state.set(TYPING, true)
+    }
+    $.clock.after(TYPING_FOR + 100, () => {
+      if (Date.now() - lastEdit >= TYPING_FOR) {
+        void $.state.set(TYPING, false)
+      }
+    })
 
     return next(e)
   })
@@ -160,20 +234,32 @@ export const register: Register = on => {
     )
   })
 
-  // 输入框上方那一条：左边是小宠物，右边是用量条，上下文快满时多一张提醒卡片
+  // 输入框上方那一条：团子兔（和子代理小兔子）+ 用量条，上下文快满时多一张提醒卡片
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || e.surface !== 'desktop') {
       return next(e)
     }
     const { Box, Button, Svg, Text } = $.ui.resolve(e)
     const usage = (await $.state.get(USAGE)).value ?? {}
-    const isWorking = e.props.isWorking
+    const isWorking = e.props.isWorking || ((await $.state.get(BUSY)).value ?? false)
     const resets = clockOf(usage.resetsAt)
     const isFull = (usage.context ?? 0) >= CONTEXT_WARN
-    const clock = (await $.state.get(CLOCK)).value
+    const helpers = (await $.state.get(AGENTS)).value ?? 0
+    const flash = (await $.state.get(FLASH)).value ?? null
+    // 优先级：干活 > 刚结束的开心/难过 > 你在打字 > 睡着 > 深夜 > 发呆
+    const mood: Mood = isWorking
+      ? ((await $.state.get(TOOL)).value ?? 'busy')
+      : (flash ??
+        ((await $.state.get(TYPING)).value === true
+          ? 'typing'
+          : (await $.state.get(SLEEP)).value === true
+            ? 'sleep'
+            : (await $.state.get(NIGHT)).value === true
+              ? 'yawn'
+              : 'idle'))
 
-    const bar = (key: string, label: string, percent: number, note: string) => (
-      <Box key={key} flexDirection="row" alignItems="center" gap="sm">
+    const bar = (id: string, label: string, percent: number, note: string) => (
+      <Box key={id} flexDirection="row" alignItems="center" gap="sm">
         <Text size="footnote" color={PINK}>
           {label}
         </Text>
@@ -186,13 +272,17 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="row" alignItems="center" gap="md">
-        <Svg
-          source={isWorking ? PET_BUSY : PET_IDLE}
-          alt={isWorking ? '团子兔正在一蹦一蹦地干活' : '团子兔在发呆'}
-          width={40}
-          height={48}
-          isInteractive
-        />
+        <Svg source={petSvg(mood)} alt={MOOD_TEXT[mood]} width={40} height={48} isInteractive />
+        {helpers > 0 ? (
+          <Svg
+            key="buddies"
+            source={buddySvg(helpers)}
+            alt={`${helpers} 只小兔子在帮忙`}
+            width={Math.min(4, helpers) * 21}
+            height={24}
+            isInteractive
+          />
+        ) : null}
         <Box flexDirection="column" gap="xs">
           {isFull ? (
             <Box
@@ -236,29 +326,22 @@ export const register: Register = on => {
             : null}
           {usage.context !== undefined ? bar('context', '上下文', usage.context, '') : null}
         </Box>
-        <Box flexGrow={1} />
-        {clock !== undefined ? (
-          <Box key="clock" flexDirection="column" alignItems="flex-end" paddingRight="sm">
-            <Text size="heading" weight="semibold" color={PINK} tabular>
-              {clock.time}
-            </Text>
-            <Text size="caption" color={PINK}>
-              {clock.date}
-            </Text>
-          </Box>
-        ) : null}
       </Box>
     )
   })
 
-  // 背景必须是单独一个 Svg：桌面版只给这种结构播放动画
+  // 背景必须是单独一个 Svg：桌面版只给这种结构播放动画。时钟按画的这一刻对准，之后自己走
   on('ui.render', { component: 'Backdrop' }, async ($, e, next) => {
     if (e.props.scene !== 'sakura' || (e.surface !== 'desktop' && e.surface !== 'mobile')) {
       return next(e)
     }
 
     const { Svg } = $.ui.resolve(e)
+    const phase = (await $.state.get(PHASE)).value ?? 0
+    const isBusy = (await $.state.get(BUSY)).value ?? false
 
-    return <Svg source={sceneFor((await $.state.get(PHASE)).value ?? 0, (await $.state.get(BUSY)).value ?? false)} alt="像素风樱花树，花瓣飘落，月亮随额度圆缺" isInteractive />
+    return (
+      <Svg source={sceneFor(phase, isBusy, new Date())} alt="像素风樱花树，花瓣飘落，月亮随额度圆缺，像素时钟" isInteractive />
+    )
   })
 }

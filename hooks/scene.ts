@@ -291,71 +291,117 @@ const drawMoon = (phase: number): string => {
 const CALM = { petals: 24, pace: 1.15 }
 const BUSY = { petals: 64, pace: 0.7 }
 
-const scenes = new Map<string, string>()
+// ---- 像素时钟 ----
+// 在月亮右边显示"时:分"。数字不靠重画背景来更新：每一位是一条竖排的数字带，
+// 用 CSS 动画按 steps 一格格往上推（时 24 格/天、分十位 6 格/时、分个位 10 格/10 分钟），
+// 生成时用负的 animation-delay 对准当前时间，之后它自己走，背景不用每分钟重画。
+const DIGITS = [
+  ['111', '101', '101', '101', '111'],
+  ['010', '110', '010', '010', '111'],
+  ['111', '001', '111', '100', '111'],
+  ['111', '001', '111', '001', '111'],
+  ['101', '101', '111', '001', '001'],
+  ['111', '100', '111', '001', '111'],
+  ['111', '100', '111', '101', '111'],
+  ['111', '001', '001', '001', '001'],
+  ['111', '101', '111', '101', '111'],
+  ['111', '101', '111', '001', '111'],
+]
+const CLOCK_X = 616 // 月亮右边
+const CLOCK_Y = 300
+const ROW = 6 * CELL // 数字带里相邻两个数字的间距：5 格字高 + 1 格空
 
-/** 月相为 phase（0 满月 … 10 新月）、是否在干活时的整张背景 SVG，每种组合只算一次 */
-export const sceneFor = (phase: number, isBusy: boolean): string => {
-  const id = `${phase}-${isBusy}`
-  const cached = scenes.get(id)
+/** 把一串数字画成一条 path：digits[k] 画在第 k 行，x 是这一位的左边 */
+const digitPath = (rows: number[][], x0: number): string => {
+  const runs: string[] = []
 
-  if (cached !== undefined) {
-    return cached
-  }
-  seed = 11
-  const rules: string[] = []
-  const trees = drawTrees()
-  const clouds = drawClouds(rules)
-  const look = isBusy ? BUSY : CALM
-  const petals = drawPetals(look.petals, look.pace, rules)
+  rows.forEach((digits, k) => {
+    digits.forEach((d, j) => {
+      ;(DIGITS[d] ?? []).forEach((line, y) => {
+        ;[...line].forEach((c, x) => {
+          if (c === '1') {
+            runs.push(`M${x0 + (j * 4 + x) * CELL} ${CLOCK_Y + k * ROW + y * CELL}h${CELL}v${CELL}h-${CELL}z`)
+          }
+        })
+      })
+    })
+  })
 
-  rules.push(`@media (prefers-reduced-motion: reduce){g{animation:none}}`)
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}" preserveAspectRatio="xMidYMid slice">` +
-    `<style>${rules.join('')}</style>` +
-    `<rect width="${SIZE}" height="${SIZE}" fill="#fff1f1"/>` +
-    drawMoon(phase) +
-    clouds +
-    trees +
-    petals +
-    `</svg>`
-
-  scenes.set(id, svg)
-
-  return svg
+  return runs.join('')
 }
 
-// ---- 思考时的小动画 ----
-// 一朵五瓣像素樱花慢慢转，花心一闪一闪；同样守白名单（只用 rotate、opacity）。
-const flowerCells: Cells = new Map()
-const FLOWER = [
-  '...pp...',
-  '..pPPp..',
-  '.pp.PP.p',
-  'pPPyyPPp',
-  'pPPyyPPp',
-  '.pp..pp.',
-  '..pPPp..',
-  '...pp...',
-]
+const range = (n: number) => [...Array(n).keys()]
+const CLOCK_INK = '#eaa3b5'
+// 三条数字带，各自的位置固定，只有动画的起点随时间变
+const HOURS = digitPath(range(24).map(h => [Math.floor(h / 10), h % 10]), CLOCK_X)
+const TENS = digitPath(range(6).map(t => [t]), CLOCK_X + 12 * CELL)
+const ONES = digitPath(range(10).map(o => [o]), CLOCK_X + 16 * CELL)
 
-FLOWER.forEach((line, y) => {
-  ;[...line].forEach((c, x) => {
-    const color = c === 'p' ? '#f4acbc' : c === 'P' ? '#f9c9d3' : c === 'y' ? '#f3c96b' : undefined
+/** 按 at 这一刻对准的像素时钟（含它自己的 <style>） */
+export const drawClock = (at: Date): string => {
+  const secs = at.getHours() * 3600 + at.getMinutes() * 60 + at.getSeconds()
+  const strip = (name: string, x: number, width: number, path: string, cycle: number, count: number, now: number) => {
+    const offset = now % cycle
+    const index = Math.floor((offset * count) / cycle)
 
-    if (color !== undefined) {
-      flowerCells.set(`${x},${y}`, color)
+    return {
+      rule:
+        `.${name}{animation:${name} ${cycle}s steps(${count}) -${offset}s infinite}` +
+        `@keyframes ${name}{from{transform:translate(0px,0px)}to{transform:translate(0px,-${count * ROW}px)}}`,
+      clip: `<clipPath id="k${name}"><rect x="${x}" y="${CLOCK_Y}" width="${width}" height="${5 * CELL}"/></clipPath>`,
+      body:
+        `<g clip-path="url(#k${name})"><g class="${name}" transform="translate(0 -${index * ROW})">` +
+        `<path fill="${CLOCK_INK}" d="${path}"/></g></g>`,
     }
-  })
-})
+  }
+  const parts = [
+    strip('kh', CLOCK_X, 7 * CELL, HOURS, 86400, 24, secs),
+    strip('kt', CLOCK_X + 12 * CELL, 3 * CELL, TENS, 3600, 6, secs),
+    strip('ko', CLOCK_X + 16 * CELL, 3 * CELL, ONES, 600, 10, secs),
+  ]
+  // 中间的冒号，一秒一闪
+  const dot = (y: number) => `<rect x="${CLOCK_X + 9 * CELL}" y="${CLOCK_Y + y * CELL}" width="${CELL}" height="${CELL}"/>`
 
-export const SPINNER =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
-  `<style>.f{transform-origin:32px 32px;animation:f 4s linear infinite}` +
-  `@keyframes f{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}` +
-  `.c{animation:c 1.2s linear infinite}@keyframes c{0%{opacity:1}50%{opacity:0.35}100%{opacity:1}}` +
-  `@media (prefers-reduced-motion: reduce){g{animation:none}}</style>` +
-  `<g class="f">${toPaths(flowerCells)}<g class="c"><rect x="24" y="24" width="16" height="16" fill="#fbe7a6"/></g></g>` +
-  `</svg>`
+  return (
+    `<style>${parts.map(p => p.rule).join('')}` +
+    `.kc{animation:kc 2s steps(2) infinite}@keyframes kc{from{opacity:1}to{opacity:0.2}}</style>` +
+    `<defs>${parts.map(p => p.clip).join('')}</defs>` +
+    parts.map(p => p.body).join('') +
+    `<g class="kc" fill="${CLOCK_INK}">${dot(1)}${dot(3)}</g>`
+  )
+}
+
+const scenes = new Map<string, [string, string]>()
+
+/**
+ * 月相为 phase（0 满月 … 10 新月）、是否在干活时的整张背景 SVG；
+ * 时钟按 at 对准，插在月亮后面、云的前面（云会从时钟前面飘过）。
+ */
+export const sceneFor = (phase: number, isBusy: boolean, at: Date): string => {
+  const id = `${phase}-${isBusy}`
+  let cached = scenes.get(id)
+
+  if (cached === undefined) {
+    seed = 11
+    const rules: string[] = []
+    const trees = drawTrees()
+    const clouds = drawClouds(rules)
+    const look = isBusy ? BUSY : CALM
+    const petals = drawPetals(look.petals, look.pace, rules)
+
+    rules.push(`@media (prefers-reduced-motion: reduce){g{animation:none}}`)
+    cached = [
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}" preserveAspectRatio="xMidYMid slice">` +
+        `<style>${rules.join('')}</style>` +
+        `<rect width="${SIZE}" height="${SIZE}" fill="#fff1f1"/>` +
+        drawMoon(phase),
+      clouds + trees + petals + `</svg>`,
+    ]
+    scenes.set(id, cached)
+  }
+
+  return cached[0] + drawClock(at) + cached[1]
+}
 
 // ---- 用量条 ----
 // 一排 10 朵像素小花，每朵代表 10%：用掉的部分是深粉色，剩下的是浅粉色。
@@ -399,3 +445,36 @@ export const petalBar = (percent: number): string => {
 
   return svg
 }
+
+// ---- 思考时的小动画 ----
+// 一朵五瓣像素樱花慢慢转，花心一闪一闪；同样守白名单（只用 rotate、opacity）。
+const flowerCells: Cells = new Map()
+const FLOWER = [
+  '...pp...',
+  '..pPPp..',
+  '.pp.PP.p',
+  'pPPyyPPp',
+  'pPPyyPPp',
+  '.pp..pp.',
+  '..pPPp..',
+  '...pp...',
+]
+
+FLOWER.forEach((line, y) => {
+  ;[...line].forEach((c, x) => {
+    const color = c === 'p' ? '#f4acbc' : c === 'P' ? '#f9c9d3' : c === 'y' ? '#f3c96b' : undefined
+
+    if (color !== undefined) {
+      flowerCells.set(`${x},${y}`, color)
+    }
+  })
+})
+
+export const SPINNER =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+  `<style>.f{transform-origin:32px 32px;animation:f 4s linear infinite}` +
+  `@keyframes f{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}` +
+  `.c{animation:c 1.2s linear infinite}@keyframes c{0%{opacity:1}50%{opacity:0.35}100%{opacity:1}}` +
+  `@media (prefers-reduced-motion: reduce){g{animation:none}}</style>` +
+  `<g class="f">${toPaths(flowerCells)}<g class="c"><rect x="24" y="24" width="16" height="16" fill="#fbe7a6"/></g></g>` +
+  `</svg>`
