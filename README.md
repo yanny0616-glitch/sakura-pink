@@ -26,8 +26,6 @@ claude plugin install sakura-pink --marketplace yanny0616-glitch/sakura-pink
 
 在桌面版里（`/plugin` 不可用）：点输入框旁的 +，选 Plugins，Add marketplace 填 `yanny0616-glitch/sakura-pink`，再 Add plugin。
 
-这是私有仓库：只有能在 GitHub 上读到它的人可以安装，并且电脑上要先配置好 github.com 的 git 凭据（SSH key，或 `gh auth login` 后 `gh auth setup-git`），安装过程不会弹出登录。
-
 ## 修改
 
 树的位置和大小在 `hooks/scene.ts` 的 `TREES` 里，云在同一文件的 `cloud(...)` 调用里，配色在 `hooks/register.tsx`。
