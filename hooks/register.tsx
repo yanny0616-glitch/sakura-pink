@@ -327,10 +327,10 @@ export const register: Register = on => {
           {usage.fiveHour !== undefined || usage.weekly !== undefined ? (
             <Box key="quota" flexDirection="row" alignItems="center" gap="lg" flexWrap="wrap">
               {usage.fiveHour !== undefined
-                ? bar('five', '5 小时额度', usage.fiveHour, resets === undefined ? '' : ` · ${resets} 重置`)
+                ? bar('five', '5 小时', usage.fiveHour, resets === undefined ? '' : ` · ${resets}`)
                 : null}
               {usage.weekly !== undefined
-                ? bar('week', '每周额度', usage.weekly, weekResets === undefined ? '' : ` · ${weekResets} 重置`)
+                ? bar('week', '每周', usage.weekly, weekResets === undefined ? '' : ` · ${weekResets}`)
                 : null}
             </Box>
           ) : null}
