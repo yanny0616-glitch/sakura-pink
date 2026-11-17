@@ -59,6 +59,8 @@ const SLEEP_AFTER = 10 * 60_000
 const FLASH_FOR = 4000
 // 停止打字多久后不再看输入框
 const TYPING_FOR = 2500
+// 团子兔显示多宽（像素）；高度按画面比例算
+const PET_W = 64
 const PINK = '#c76a84'
 const DEEP = '#b5405f'
 
@@ -321,12 +323,12 @@ export const register: Register = on => {
             key="buddies"
             source={buddySvg(helpers)}
             alt={`${helpers} 只小兔子在帮忙`}
-            width={Math.min(4, helpers) * 21}
-            height={24}
+            width={Math.min(4, helpers) * 28}
+            height={32}
             isInteractive
           />
         ) : null}
-        <Svg source={petSvg(mood)} alt={MOOD_TEXT[mood]} width={40} height={48} isInteractive />
+        <Svg source={petSvg(mood)} alt={MOOD_TEXT[mood]} width={PET_W} height={Math.round((PET_W * 57) / 48)} isInteractive />
       </Box>
     )
   })
