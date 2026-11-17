@@ -356,3 +356,46 @@ export const SPINNER =
   `@media (prefers-reduced-motion: reduce){g{animation:none}}</style>` +
   `<g class="f">${toPaths(flowerCells)}<g class="c"><rect x="24" y="24" width="16" height="16" fill="#fbe7a6"/></g></g>` +
   `</svg>`
+
+// ---- 用量条 ----
+// 一排 10 朵像素小花，每朵代表 10%：用掉的部分是深粉色，剩下的是浅粉色。
+const BLOOM = ['.p.p.', 'ppppp', '.pyp.', 'ppppp', '.p.p.']
+const bars = new Map<number, string>()
+
+/** 用了 percent% 时的用量条 SVG（宽 120、高 10），每种格数只算一次 */
+export const petalBar = (percent: number): string => {
+  const filled = Math.min(10, Math.max(0, Math.round(percent / 10)))
+  const cached = bars.get(filled)
+
+  if (cached !== undefined) {
+    return cached
+  }
+  const cells: Map<string, string> = new Map()
+
+  for (let i = 0; i < 10; i++) {
+    const isUsed = i < filled
+
+    BLOOM.forEach((line, y) => {
+      ;[...line].forEach((c, x) => {
+        if (c !== '.') {
+          const color = c === 'y' ? (isUsed ? '#f3c96b' : '#f8e6c4') : isUsed ? '#e98fa6' : '#f6dbe1'
+
+          cells.set(`${i * 6 + x},${y}`, color)
+        }
+      })
+    })
+  }
+  // 这里一格是 2px，不能直接用背景那个 8px 的 toPaths
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 10">` +
+    [...cells].map(([key, color]) => {
+      const [x, y] = key.split(',').map(Number)
+
+      return `<rect x="${(x ?? 0) * 2}" y="${(y ?? 0) * 2}" width="2" height="2" fill="${color}"/>`
+    }).join('') +
+    `</svg>`
+
+  bars.set(filled, svg)
+
+  return svg
+}

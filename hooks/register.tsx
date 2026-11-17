@@ -1,7 +1,10 @@
-import type { Register, SessionRateLimit, ThemeSetArgs } from 'claude-code'
+import type { Register, SessionContextUsage, SessionRateLimit, ThemeSetArgs } from 'claude-code'
+
+import type { Usage } from '../types'
 
 import { makeColors } from './make-colors.js'
-import { phaseOf, sceneFor, SPINNER } from './scene'
+import { PET_BUSY, PET_IDLE } from './pet'
+import { petalBar, phaseOf, sceneFor, SPINNER } from './scene'
 
 // 底色取自参考图的 #fff1f1，卡片/面板往奶白 #fffaf3 过渡；强调色等保持 App 默认。
 const { theme, problems } = makeColors({
@@ -32,6 +35,31 @@ const PHASE = { plugin: 'sakura-pink', key: 'phase' } as const
 // Claude 是否正在干活：干活时花瓣更密更快
 const BUSY = { plugin: 'sakura-pink', key: 'busy' } as const
 const fiveHour = (windows: SessionRateLimit[]) => windows.find(w => w.kind === 'five_hour')?.percentUsed
+// 输入框上方那一条显示的用量
+const USAGE = { plugin: 'sakura-pink', key: 'usage' } as const
+const usageOf = (windows: SessionRateLimit[], context: SessionContextUsage): Usage => {
+  const five = windows.find(w => w.kind === 'five_hour')
+
+  return { fiveHour: five?.percentUsed, resetsAt: five?.resetsAt, context: context.percent }
+}
+// 上下文用到这么多就提醒压缩
+const CONTEXT_WARN = 85
+const PINK = '#c76a84'
+const DEEP = '#b5405f'
+
+/** 重置时间按本机时间显示成 15:20 */
+const clockOf = (iso: string | undefined): string | undefined => {
+  if (iso === undefined) {
+    return undefined
+  }
+  const at = new Date(iso)
+
+  if (Number.isNaN(at.getTime())) {
+    return undefined
+  }
+
+  return `${at.getHours()}:${String(at.getMinutes()).padStart(2, '0')}`
+}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -46,12 +74,16 @@ export const register: Register = on => {
     const usage = await $.session.usage()
 
     await $.state.set(PHASE, phaseOf(fiveHour(usage.rateLimits)))
+    await $.state.set(USAGE, usageOf(usage.rateLimits, usage.context))
 
     return next(e)
   })
 
   // 额度每变一整格（10%）才换月相；同一月相不写，背景就不会重画
   on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('rateLimits') || e.changed.includes('context')) {
+      await $.state.set(USAGE, usageOf(e.rateLimits, e.context))
+    }
     if (e.changed.includes('rateLimits')) {
       const now = phaseOf(fiveHour(e.rateLimits))
 
@@ -102,6 +134,85 @@ export const register: Register = on => {
           {says}
           {e.props.suffix}
         </Text>
+      </Box>
+    )
+  })
+
+  // 输入框上方那一条：左边是小宠物，右边是用量条，上下文快满时多一张提醒卡片
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || e.surface !== 'desktop') {
+      return next(e)
+    }
+    const { Box, Button, Svg, Text } = $.ui.resolve(e)
+    const usage = (await $.state.get(USAGE)).value ?? {}
+    const isWorking = e.props.isWorking
+    const resets = clockOf(usage.resetsAt)
+    const isFull = (usage.context ?? 0) >= CONTEXT_WARN
+
+    const bar = (key: string, label: string, percent: number, note: string) => (
+      <Box key={key} flexDirection="row" alignItems="center" gap="sm">
+        <Text size="footnote" color={PINK}>
+          {label}
+        </Text>
+        <Svg source={petalBar(percent)} alt={`${label}用了 ${Math.round(percent)}%`} width={120} height={10} />
+        <Text size="footnote" color={percent >= 90 ? DEEP : PINK} tabular>
+          {`${Math.round(percent)}%${note}`}
+        </Text>
+      </Box>
+    )
+
+    return (
+      <Box flexDirection="row" alignItems="center" gap="md">
+        <Svg
+          source={isWorking ? PET_BUSY : PET_IDLE}
+          alt={isWorking ? '团子兔正在一蹦一蹦地干活' : '团子兔在发呆'}
+          width={40}
+          height={48}
+          isInteractive
+        />
+        <Box flexDirection="column" gap="xs">
+          {isFull ? (
+            <Box
+              key="warn"
+              flexDirection="row"
+              alignItems="center"
+              gap="sm"
+              paddingX="sm"
+              borderStyle="round"
+              borderColor="#f4acbc"
+              backgroundColor="#ffe3ea"
+            >
+              <Text size="footnote" color={DEEP}>
+                {`上下文已用 ${Math.round(usage.context ?? 0)}%，快满了，压缩一下能腾出空间`}
+              </Text>
+              <Button
+                key="compact"
+                label="压缩"
+                variant="primary"
+                onPress={async () => {
+                  if (isWorking) {
+                    $.ui.toast('等这一轮回答完再压缩')
+
+                    return
+                  }
+                  try {
+                    const done = await $.session.compact()
+
+                    if ('skip' in done && done.skip !== undefined) {
+                      $.ui.toast('这次压缩被跳过了')
+                    }
+                  } catch {
+                    $.ui.toast('现在没法压缩，等这一轮结束再试')
+                  }
+                }}
+              />
+            </Box>
+          ) : null}
+          {usage.fiveHour !== undefined
+            ? bar('five', '5 小时额度', usage.fiveHour, resets === undefined ? '' : ` · ${resets} 重置`)
+            : null}
+          {usage.context !== undefined ? bar('context', '上下文', usage.context, '') : null}
+        </Box>
       </Box>
     )
   })
