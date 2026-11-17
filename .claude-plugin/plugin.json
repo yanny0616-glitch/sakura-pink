@@ -1,6 +1,6 @@
 {
   "name": "sakura-pink",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "浅色粉嫩主题：#fff1f1 底色 + 像素风樱花树与飘落花瓣，像素月亮随 5 小时额度圆缺，思考时有旋转小樱花，输入框上方有团子兔宠物和用量条",
   "types": "./types/index.d.ts"
 }

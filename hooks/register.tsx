@@ -42,6 +42,17 @@ const usageOf = (windows: SessionRateLimit[], context: SessionContextUsage): Usa
 
   return { fiveHour: five?.percentUsed, resetsAt: five?.resetsAt, context: context.percent }
 }
+// 输入框上方那一条右边显示的时间：每 10 秒看一次，分钟变了才写，只有那一条重画
+const CLOCK = { plugin: 'sakura-pink', key: 'clock' } as const
+const WEEK = ['日', '一', '二', '三', '四', '五', '六']
+const nowText = () => {
+  const at = new Date()
+
+  return {
+    time: `${at.getHours()}:${String(at.getMinutes()).padStart(2, '0')}`,
+    date: `${at.getMonth() + 1}月${at.getDate()}日 周${WEEK[at.getDay()] ?? ''}`,
+  }
+}
 // 上下文用到这么多就提醒压缩
 const CONTEXT_WARN = 85
 const PINK = '#c76a84'
@@ -75,6 +86,17 @@ export const register: Register = on => {
 
     await $.state.set(PHASE, phaseOf(fiveHour(usage.rateLimits)))
     await $.state.set(USAGE, usageOf(usage.rateLimits, usage.context))
+
+    await $.state.set(CLOCK, nowText())
+    $.clock.every(10_000, () => {
+      const now = nowText()
+
+      void $.state.get(CLOCK).then(held => {
+        if (held.value?.time !== now.time) {
+          void $.state.set(CLOCK, now)
+        }
+      })
+    })
 
     return next(e)
   })
@@ -148,6 +170,7 @@ export const register: Register = on => {
     const isWorking = e.props.isWorking
     const resets = clockOf(usage.resetsAt)
     const isFull = (usage.context ?? 0) >= CONTEXT_WARN
+    const clock = (await $.state.get(CLOCK)).value
 
     const bar = (key: string, label: string, percent: number, note: string) => (
       <Box key={key} flexDirection="row" alignItems="center" gap="sm">
@@ -213,6 +236,17 @@ export const register: Register = on => {
             : null}
           {usage.context !== undefined ? bar('context', '上下文', usage.context, '') : null}
         </Box>
+        <Box flexGrow={1} />
+        {clock !== undefined ? (
+          <Box key="clock" flexDirection="column" alignItems="flex-end" paddingRight="sm">
+            <Text size="heading" weight="semibold" color={PINK} tabular>
+              {clock.time}
+            </Text>
+            <Text size="caption" color={PINK}>
+              {clock.date}
+            </Text>
+          </Box>
+        ) : null}
       </Box>
     )
   })

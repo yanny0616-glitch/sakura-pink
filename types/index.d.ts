@@ -13,6 +13,6 @@ export type Usage = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'sakura-pink': { phase: MoonPhase; busy: boolean; usage: Usage }
+    'sakura-pink': { phase: MoonPhase; busy: boolean; usage: Usage; clock: { time: string; date: string } }
   }
 }
